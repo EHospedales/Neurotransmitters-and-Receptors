@@ -52,6 +52,13 @@ export interface Drug {
   mechanismSummary: string;
 }
 
+export interface CypInteractionProfile {
+  substrates: string[];
+  inhibits: string[];
+  induces: string[];
+  notes?: string;
+}
+
 export type QuestionType = 'drug_to_receptor' | 'receptor_to_effect' | 'drug_to_effect' | 'effect_to_drug';
 
 export interface QuizQuestion {

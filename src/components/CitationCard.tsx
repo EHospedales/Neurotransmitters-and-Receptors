@@ -1,15 +1,12 @@
 import type { Citation } from '../types';
+import { getCitationLinks } from '../utils/citation';
 
 interface CitationCardProps {
   citation: Citation;
 }
 
 export default function CitationCard({ citation }: CitationCardProps) {
-  const url = citation.doi
-    ? `https://doi.org/${citation.doi}`
-    : citation.pmid
-    ? `https://pubmed.ncbi.nlm.nih.gov/${citation.pmid}/`
-    : null;
+  const { titleSearchUrl } = getCitationLinks(citation);
 
   return (
     <div className="citation-card">
@@ -17,11 +14,11 @@ export default function CitationCard({ citation }: CitationCardProps) {
       <span>
         <strong>{citation.authors}</strong> ({citation.year}). {citation.title}.{' '}
         <em>{citation.journal}</em>.
-        {url && (
+        {titleSearchUrl && (
           <>
             {' '}
-            <a href={url} target="_blank" rel="noopener noreferrer">
-              {citation.doi ? `DOI: ${citation.doi}` : `PMID: ${citation.pmid}`}
+            <a href={titleSearchUrl} target="_blank" rel="noopener noreferrer">
+              Open Citation
             </a>
           </>
         )}

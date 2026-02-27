@@ -1,11 +1,14 @@
 import { useState } from 'react';
 import { drugs, receptors } from '../data/database';
+import { getCypInteractionProfile } from '../data/cypInteractions';
 import ActionBadge from './ActionBadge';
 import type { Drug, Receptor } from '../types';
 import type { UserProgress } from '../types';
 import { markDrugReviewed, markReceptorReviewed, saveProgress } from '../utils/storage';
+import { getCitationLinks } from '../utils/citation';
 
 type View = 'matrix' | 'drug' | 'receptor';
+type ExplorerTableView = 'receptor' | 'cyp';
 
 interface Props {
   progress: UserProgress;
@@ -17,6 +20,12 @@ const DRUG_CLASS_COLORS: Record<string, string> = {
   'Atypical Antipsychotic (2nd generation)': '#fdba74',
   'Atypical Antipsychotic (3rd generation / Dopamine Partial Agonist)': '#fcd34d',
   'SSRI (Selective Serotonin Reuptake Inhibitor)': '#6ee7b7',
+  'SSRI / SPARI (Serotonin Partial Agonist-Reuptake Inhibitor)': '#86efac',
+  'SMS (Serotonin Modulator and Stimulator)': '#5eead4',
+  'Melatonergic Antidepressant': '#a7f3d0',
+  'TAAR1 Agonist (Investigational Antipsychotic)': '#fbcfe8',
+  '5-HT4 Agonist (Investigational Pro-cognitive)': '#99f6e4',
+  '5-HT6 Antagonist (Investigational Pro-cognitive)': '#bae6fd',
   'SNRI (Serotonin-Norepinephrine Reuptake Inhibitor)': '#67e8f9',
   'NDRI (Norepinephrine-Dopamine Reuptake Inhibitor)': '#93c5fd',
   'NaSSA (Noradrenergic and Specific Serotonergic Antidepressant)': '#c4b5fd',
@@ -38,6 +47,7 @@ export default function Explorer({ progress, setProgress }: Props) {
   const [selectedReceptor, setSelectedReceptor] = useState<Receptor | null>(null);
   const [filterClass, setFilterClass] = useState<string>('All');
   const [searchTerm, setSearchTerm] = useState('');
+  const [tableView, setTableView] = useState<ExplorerTableView>('receptor');
 
   const allClasses = ['All', ...new Set(drugs.map((d) => d.drugClass))];
 
@@ -94,71 +104,130 @@ export default function Explorer({ progress, setProgress }: Props) {
             </option>
           ))}
         </select>
+
+        <div className="table-toggle" role="group" aria-label="Explorer table mode">
+          <button
+            className={`table-toggle-btn${tableView === 'receptor' ? ' active' : ''}`}
+            onClick={() => setTableView('receptor')}
+          >
+            Receptor Matrix
+          </button>
+          <button
+            className={`table-toggle-btn${tableView === 'cyp' ? ' active' : ''}`}
+            onClick={() => setTableView('cyp')}
+          >
+            CYP Table
+          </button>
+        </div>
       </div>
 
-      <div className="matrix-container">
-        <table className="matrix-table">
-          <thead>
-            <tr>
-              <th className="drug-header-cell">Drug</th>
-              {receptors.map((r) => (
-                <th key={r.id} className="receptor-header-cell">
-                  <button
-                    className="receptor-header-btn"
-                    onClick={() => openReceptor(r)}
-                    title={r.description}
-                  >
-                    <span className="receptor-abbr">{r.id}</span>
-                    <span className="receptor-nt">{r.neurotransmitter}</span>
-                  </button>
-                </th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {filteredDrugs.map((drug) => (
-              <tr key={drug.id}>
-                <td className="drug-name-cell">
-                  <button
-                    className="drug-name-btn"
-                    style={{ borderLeft: `4px solid ${getDrugClassColor(drug.drugClass)}` }}
-                    onClick={() => openDrug(drug)}
-                  >
-                    <span className="drug-name">{drug.name}</span>
-                    <span className="drug-brand">{drug.brandNames[0]}</span>
-                  </button>
-                </td>
-                {receptors.map((receptor) => {
-                  const binding = drug.receptorBindings.find((rb) => rb.receptorId === receptor.id);
-                  return (
-                    <td key={receptor.id} className="binding-cell">
-                      {binding ? (
-                        <ActionBadge action={binding.action} affinity={binding.affinity} small />
-                      ) : (
-                        <span className="no-binding">—</span>
-                      )}
+      {tableView === 'receptor' ? (
+        <>
+          <div className="matrix-container">
+            <table className="matrix-table">
+              <thead>
+                <tr>
+                  <th className="drug-header-cell">Drug</th>
+                  {receptors.map((r) => (
+                    <th key={r.id} className="receptor-header-cell">
+                      <button
+                        className="receptor-header-btn"
+                        onClick={() => openReceptor(r)}
+                        title={r.description}
+                      >
+                        <span className="receptor-abbr">{r.id}</span>
+                        <span className="receptor-nt">{r.neurotransmitter}</span>
+                      </button>
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {filteredDrugs.map((drug) => (
+                  <tr key={drug.id}>
+                    <td className="drug-name-cell">
+                      <button
+                        className="drug-name-btn"
+                        style={{ borderLeft: `4px solid ${getDrugClassColor(drug.drugClass)}` }}
+                        onClick={() => openDrug(drug)}
+                      >
+                        <span className="drug-name">{drug.name}</span>
+                        <span className="drug-brand">{drug.brandNames[0]}</span>
+                      </button>
                     </td>
+                    {receptors.map((receptor) => {
+                      const binding = drug.receptorBindings.find((rb) => rb.receptorId === receptor.id);
+                      return (
+                        <td key={receptor.id} className="binding-cell">
+                          {binding ? (
+                            <ActionBadge action={binding.action} affinity={binding.affinity} small />
+                          ) : (
+                            <span className="no-binding">—</span>
+                          )}
+                        </td>
+                      );
+                    })}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+
+          <div className="legend">
+            <strong>Legend:</strong>
+            {[
+              { action: 'agonist', label: 'Agonist' },
+              { action: 'antagonist', label: 'Antagonist' },
+              { action: 'partial_agonist', label: 'Partial Agonist' },
+              { action: 'reuptake_inhibitor', label: 'Reuptake Inhibitor' },
+              { action: 'allosteric_modulator', label: 'PAM' },
+            ].map((item) => (
+              <ActionBadge key={item.action} action={item.action as never} small />
+            ))}
+            <span className="affinity-legend">Affinity: ●●● High &nbsp; ●●○ Med &nbsp; ●○○ Low</span>
+          </div>
+        </>
+      ) : (
+        <div className="cyp-section">
+          <h3 className="cyp-title">CYP Enzyme Interaction Table</h3>
+          <div className="matrix-container">
+            <table className="matrix-table cyp-table">
+              <thead>
+                <tr>
+                  <th className="drug-header-cell">Drug</th>
+                  <th className="drug-header-cell">Substrate(s)</th>
+                  <th className="drug-header-cell">Inhibits</th>
+                  <th className="drug-header-cell">Induces</th>
+                  <th className="drug-header-cell">Notes</th>
+                </tr>
+              </thead>
+              <tbody>
+                {filteredDrugs.map((drug) => {
+                  const cyp = getCypInteractionProfile(drug.name);
+                  return (
+                    <tr key={`cyp_${drug.id}`}>
+                      <td className="drug-name-cell">
+                        <button
+                          className="drug-name-btn"
+                          style={{ borderLeft: `4px solid ${getDrugClassColor(drug.drugClass)}` }}
+                          onClick={() => openDrug(drug)}
+                        >
+                          <span className="drug-name">{drug.name}</span>
+                          <span className="drug-brand">{drug.brandNames[0]}</span>
+                        </button>
+                      </td>
+                      <td className="cyp-cell">{joinOrDash(cyp.substrates)}</td>
+                      <td className="cyp-cell">{joinOrDash(cyp.inhibits)}</td>
+                      <td className="cyp-cell">{joinOrDash(cyp.induces)}</td>
+                      <td className="cyp-cell cyp-note">{cyp.notes ?? '—'}</td>
+                    </tr>
                   );
                 })}
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-
-      <div className="legend">
-        <strong>Legend:</strong>
-        {[
-          { action: 'agonist', label: 'Agonist' },
-          { action: 'antagonist', label: 'Antagonist' },
-          { action: 'partial_agonist', label: 'Partial Agonist' },
-          { action: 'reuptake_inhibitor', label: 'Reuptake Inhibitor' },
-          { action: 'allosteric_modulator', label: 'PAM' },
-        ].map((item) => (
-          <ActionBadge key={item.action} action={item.action as never} small />
-        ))}
-        <span className="affinity-legend">Affinity: ●●● High &nbsp; ●●○ Med &nbsp; ●○○ Low</span>
-      </div>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -203,6 +272,29 @@ function DrugDetail({
       <div className="detail-section">
         <h3>⚙️ Mechanism Summary</h3>
         <p>{drug.mechanismSummary}</p>
+      </div>
+
+      <div className="detail-section">
+        <h3>🧪 CYP Interactions</h3>
+        {(() => {
+          const cyp = getCypInteractionProfile(drug.name);
+          return (
+            <div className="binding-card">
+              <p>
+                <strong>Substrate(s):</strong> {joinOrDash(cyp.substrates)}
+              </p>
+              <p>
+                <strong>Inhibits:</strong> {joinOrDash(cyp.inhibits)}
+              </p>
+              <p>
+                <strong>Induces:</strong> {joinOrDash(cyp.induces)}
+              </p>
+              <p className="binding-relevance">
+                <strong>Notes:</strong> {cyp.notes ?? '—'}
+              </p>
+            </div>
+          );
+        })()}
       </div>
 
       <div className="detail-section">
@@ -314,25 +406,25 @@ function ReceptorDetail({
 // ─── Inline Citation ──────────────────────────────────────────────────────────
 
 function CitationInline({ citation }: { citation: { authors: string; title: string; journal: string; year: number; doi?: string; pmid?: string } }) {
-  const url = citation.doi
-    ? `https://doi.org/${citation.doi}`
-    : citation.pmid
-    ? `https://pubmed.ncbi.nlm.nih.gov/${citation.pmid}/`
-    : null;
+  const { titleSearchUrl } = getCitationLinks(citation);
   return (
     <div className="citation-card">
       <span className="citation-icon">📄</span>
       <span>
         <strong>{citation.authors}</strong> ({citation.year}). <em>{citation.journal}</em>.
-        {url && (
+        {titleSearchUrl && (
           <>
             {' '}
-            <a href={url} target="_blank" rel="noopener noreferrer">
-              View
+            <a href={titleSearchUrl} target="_blank" rel="noopener noreferrer">
+              Open Citation
             </a>
           </>
         )}
       </span>
     </div>
   );
+}
+
+function joinOrDash(values: string[]): string {
+  return values.length > 0 ? values.join(', ') : '—';
 }

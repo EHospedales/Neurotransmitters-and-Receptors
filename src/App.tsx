@@ -23,7 +23,7 @@ export default function App() {
         <div className="app-title">
           <span className="app-logo">🧠</span>
           <div>
-            <h1>NeuroRx</h1>
+            <h1>PsychRx</h1>
             <p className="app-subtitle">Psychiatric Drug Receptors &amp; Behavior</p>
           </div>
         </div>
@@ -52,7 +52,7 @@ export default function App() {
 
       <footer className="app-footer">
         <p>
-          NeuroRx · Built for psychiatric residency education · All content based on peer-reviewed
+          PsychRx · Built for psychiatric residency education · All content based on peer-reviewed
           literature · Not for clinical use
         </p>
       </footer>

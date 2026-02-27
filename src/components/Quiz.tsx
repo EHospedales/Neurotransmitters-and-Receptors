@@ -3,13 +3,48 @@ import type { QuizQuestion } from '../types';
 import type { UserProgress } from '../types';
 import { generateQuestions } from '../utils/quiz';
 import { recordAnswer, saveProgress, recordStudy } from '../utils/storage';
+import { getCitationLinks } from '../utils/citation';
+import { drugs, receptors } from '../data/database';
 
 interface Props {
   progress: UserProgress;
   setProgress: (p: UserProgress) => void;
 }
 
-type Phase = 'start' | 'question' | 'answered' | 'complete';
+type Phase = 'start' | 'question' | 'answered' | 'complete' | 'sandbox';
+type QuizMode = 'classic' | 'diagram';
+
+const ACTION_LABELS: Record<string, string> = {
+  agonist: 'activates',
+  antagonist: 'blocks',
+  partial_agonist: 'partially activates',
+  inverse_agonist: 'inverse-activates',
+  reuptake_inhibitor: 'inhibits reuptake at',
+  allosteric_modulator: 'modulates',
+};
+
+const NT_ICONS: Record<string, string> = {
+  Dopamine: '🟣',
+  Serotonin: '🟢',
+  Norepinephrine: '🟠',
+  GABA: '🔵',
+  Glutamate: '🔺',
+  Melatonin: '🌙',
+  Histamine: '🟡',
+  Acetylcholine: '🧠',
+};
+
+const DRUG_CLASS_ICONS: Record<string, string> = {
+  'Typical Antipsychotic (1st generation)': '💊',
+  'Atypical Antipsychotic (2nd generation)': '🧩',
+  'Atypical Antipsychotic (2nd generation; Dopamine Partial Agonist)': '🎯',
+  'SSRI (Selective Serotonin Reuptake Inhibitor)': '🌿',
+  'SSRI / SPARI (Serotonin Partial Agonist-Reuptake Inhibitor)': '🧬',
+  'SMS (Serotonin Modulator and Stimulator)': '🔬',
+  'SNRI (Serotonin-Norepinephrine Reuptake Inhibitor)': '⚡',
+  'Mood Stabilizer': '🪨',
+  Benzodiazepine: '😴',
+};
 
 function buildShuffledOptions(questions: QuizQuestion[]): string[][] {
   return questions.map((q) => shuffle([q.correctAnswer, ...q.wrongAnswers.slice(0, 3)]));
@@ -24,6 +59,9 @@ export default function Quiz({ progress, setProgress }: Props) {
   const [sessionCorrect, setSessionCorrect] = useState(0);
   const [sessionTotal, setSessionTotal] = useState(0);
   const [newBadges, setNewBadges] = useState<string[]>([]);
+  const [mode, setMode] = useState<QuizMode>('diagram');
+  const [sandboxReceptorId, setSandboxReceptorId] = useState('');
+  const [sandboxDrugName, setSandboxDrugName] = useState('');
 
   const shuffledOptions = useMemo(
     () => optionsPerQuestion[currentIndex] ?? [],
@@ -31,6 +69,24 @@ export default function Quiz({ progress, setProgress }: Props) {
   );
 
   function startQuiz(count = 10) {
+    if (mode === 'diagram') {
+      setQuestions([]);
+      setOptionsPerQuestion([]);
+      setCurrentIndex(0);
+      setSelected(null);
+      setSessionCorrect(0);
+      setSessionTotal(0);
+      setNewBadges([]);
+      setSandboxReceptorId('');
+      setSandboxDrugName('');
+      setPhase('sandbox');
+
+      const updated = recordStudy(progress);
+      setProgress(updated);
+      saveProgress(updated);
+      return;
+    }
+
     const qs = generateQuestions().slice(0, count);
     setQuestions(qs);
     setOptionsPerQuestion(buildShuffledOptions(qs));
@@ -80,8 +136,8 @@ export default function Quiz({ progress, setProgress }: Props) {
           <div className="quiz-icon">🧠</div>
           <h2>Receptor Quiz</h2>
           <p>
-            Test your knowledge of psychiatric drug receptors with spaced-repetition-style questions
-            backed by peer-reviewed literature.
+            Test your knowledge of psychiatric drug receptors with either classic MCQs or an object-based
+            binding challenge where receptor and drug objects interact.
           </p>
           <div className="quiz-stats-row">
             <div className="quiz-stat">
@@ -103,15 +159,49 @@ export default function Quiz({ progress, setProgress }: Props) {
             </div>
           </div>
           <div className="quiz-btn-group">
-            <button className="btn-primary" onClick={() => startQuiz(10)}>
-              Quick Quiz (10 Q)
+            <button
+              className={`btn-secondary${mode === 'classic' ? ' mode-active' : ''}`}
+              onClick={() => setMode('classic')}
+            >
+              Classic Mode
             </button>
-            <button className="btn-secondary" onClick={() => startQuiz(25)}>
-              Full Quiz (25 Q)
+            <button
+              className={`btn-secondary${mode === 'diagram' ? ' mode-active' : ''}`}
+              onClick={() => setMode('diagram')}
+            >
+              Diagram Mode
             </button>
+          </div>
+          <div className="quiz-btn-group" style={{ marginTop: '0.6rem' }}>
+            {mode === 'classic' ? (
+              <>
+                <button className="btn-primary" onClick={() => startQuiz(10)}>
+                  Quick Quiz (10 Q)
+                </button>
+                <button className="btn-secondary" onClick={() => startQuiz(25)}>
+                  Full Quiz (25 Q)
+                </button>
+              </>
+            ) : (
+              <button className="btn-primary" onClick={() => startQuiz()}>
+                Open Free Interaction Mode
+              </button>
+            )}
           </div>
         </div>
       </div>
+    );
+  }
+
+  if (phase === 'sandbox') {
+    return (
+      <DiagramSandbox
+        receptorId={sandboxReceptorId}
+        drugName={sandboxDrugName}
+        onReceptorChange={setSandboxReceptorId}
+        onDrugChange={setSandboxDrugName}
+        onBack={() => setPhase('start')}
+      />
     );
   }
 
@@ -154,6 +244,7 @@ export default function Quiz({ progress, setProgress }: Props) {
   const q = questions[currentIndex];
   if (!q) return null;
   const isCorrect = selected === q.correctAnswer;
+  const { titleSearchUrl } = getCitationLinks(q.citation);
 
   return (
     <div className="quiz-page">
@@ -201,19 +292,11 @@ export default function Quiz({ progress, setProgress }: Props) {
               <span>
                 <strong>{q.citation.authors}</strong> ({q.citation.year}).{' '}
                 <em>{q.citation.journal}</em>.
-                {(q.citation.doi || q.citation.pmid) && (
+                {titleSearchUrl && (
                   <>
                     {' '}
-                    <a
-                      href={
-                        q.citation.doi
-                          ? `https://doi.org/${q.citation.doi}`
-                          : `https://pubmed.ncbi.nlm.nih.gov/${q.citation.pmid}/`
-                      }
-                      target="_blank"
-                      rel="noopener noreferrer"
-                    >
-                      View
+                    <a href={titleSearchUrl} target="_blank" rel="noopener noreferrer">
+                      Open Citation
                     </a>
                   </>
                 )}
@@ -224,6 +307,209 @@ export default function Quiz({ progress, setProgress }: Props) {
             </button>
           </div>
         )}
+      </div>
+    </div>
+  );
+}
+
+function DiagramSandbox({
+  receptorId,
+  drugName,
+  onReceptorChange,
+  onDrugChange,
+  onBack,
+}: {
+  receptorId: string;
+  drugName: string;
+  onReceptorChange: (id: string) => void;
+  onDrugChange: (name: string) => void;
+  onBack: () => void;
+}) {
+  const selectedReceptor = receptorId ? receptors.find((r) => r.id === receptorId) : undefined;
+  const selectedDrug = drugName ? drugs.find((d) => d.name === drugName) : undefined;
+  const selectedBinding = selectedDrug?.receptorBindings.find((binding) => binding.receptorId === receptorId);
+
+  const ntIcon = NT_ICONS[selectedReceptor?.neurotransmitter ?? ''] ?? '🧠';
+  const drugIcon = selectedDrug ? DRUG_CLASS_ICONS[selectedDrug.drugClass] ?? '💊' : '💊';
+  const hasBothSelected = Boolean(selectedReceptor && selectedDrug);
+  const hasMatch = Boolean(selectedBinding);
+
+  const receptorMatches = receptorId
+    ? drugs.reduce<Array<{ drug: (typeof drugs)[number]; binding: (typeof drugs)[number]['receptorBindings'][number] }>>(
+        (accumulator, drug) => {
+          const binding = drug.receptorBindings.find((candidate) => candidate.receptorId === receptorId);
+          if (binding) accumulator.push({ drug, binding });
+          return accumulator;
+        },
+        [],
+      )
+    : [];
+
+  const actionLabel = selectedBinding ? ACTION_LABELS[selectedBinding.action] ?? 'acts at' : 'acts at';
+  const { titleSearchUrl } = selectedBinding ? getCitationLinks(selectedBinding.citation) : { titleSearchUrl: null };
+
+  return (
+    <div className="quiz-page">
+      <div className="question-card diagram-sandbox">
+        <div className="sandbox-header-row">
+          <div>
+            <h2 className="sandbox-title">Free Interaction Mode</h2>
+            <p className="sandbox-subtitle">Select any receptor and/or drug to explore real binding relationships.</p>
+          </div>
+          <button className="btn-secondary" onClick={onBack}>
+            Back to Menu
+          </button>
+        </div>
+
+        <div className="sandbox-controls">
+          <label className="sandbox-control">
+            <span>Receptor</span>
+            <select className="sandbox-select" value={receptorId} onChange={(e) => onReceptorChange(e.target.value)}>
+              <option value="">Select receptor</option>
+              {receptors.map((receptor) => (
+                <option key={receptor.id} value={receptor.id}>
+                  {receptor.name}
+                </option>
+              ))}
+            </select>
+          </label>
+
+          <label className="sandbox-control">
+            <span>Drug</span>
+            <select className="sandbox-select" value={drugName} onChange={(e) => onDrugChange(e.target.value)}>
+              <option value="">Select drug</option>
+              {drugs.map((drug) => (
+                <option key={drug.id} value={drug.name}>
+                  {drug.name}
+                </option>
+              ))}
+            </select>
+          </label>
+
+          <button
+            className="btn-secondary sandbox-clear-btn"
+            onClick={() => {
+              onReceptorChange('');
+              onDrugChange('');
+            }}
+          >
+            Clear
+          </button>
+        </div>
+
+        <div className={`binding-board${hasBothSelected ? (hasMatch ? ' success' : ' fail') : ''}`}>
+          <div className="receptor-object">
+            <div className="receptor-image" role="img" aria-label="receptor object">
+              {ntIcon}
+            </div>
+            <div className="receptor-title">{selectedReceptor?.name ?? 'Receptor'}</div>
+            <div className="receptor-sub">{selectedReceptor ? `${selectedReceptor.id} target` : 'Choose receptor'}</div>
+          </div>
+
+          <div className="binding-link-zone">
+            <span
+              className={`binding-line${hasBothSelected ? (hasMatch ? ' line-correct' : ' line-incorrect') : ''}`}
+            />
+            <span className="diagram-link-label">
+              {hasBothSelected ? (hasMatch ? 'Interaction Found' : 'No Direct Interaction') : 'Select to Explore'}
+            </span>
+          </div>
+
+          <div className="receptor-object">
+            <div className="receptor-image" role="img" aria-label="drug object">
+              {drugIcon}
+            </div>
+            <div className="receptor-title">{selectedDrug?.name ?? 'Drug'}</div>
+            <div className="receptor-sub">{selectedDrug?.drugClass ?? 'Choose drug'}</div>
+          </div>
+        </div>
+
+        {hasBothSelected && (
+          <div className={`feedback-box ${hasMatch ? 'feedback-correct' : 'feedback-incorrect'}`}>
+            <div className="feedback-header">
+              {hasMatch
+                ? `${selectedDrug?.name} ${actionLabel} ${selectedReceptor?.name}`
+                : `${selectedDrug?.name} has no listed binding at ${selectedReceptor?.name}`}
+            </div>
+            {selectedBinding ? (
+              <>
+                <p className="feedback-explanation">{selectedBinding.clinicalRelevance}</p>
+                <div className="citation-card">
+                  <span className="citation-icon">📄</span>
+                  <span>
+                    <strong>{selectedBinding.citation.authors}</strong> ({selectedBinding.citation.year}).{' '}
+                    <em>{selectedBinding.citation.journal}</em>.
+                    {titleSearchUrl && (
+                      <>
+                        {' '}
+                        <a href={titleSearchUrl} target="_blank" rel="noopener noreferrer">
+                          Open Citation
+                        </a>
+                      </>
+                    )}
+                  </span>
+                </div>
+              </>
+            ) : (
+              <p className="feedback-explanation">Try another drug or receptor to find a known interaction in the database.</p>
+            )}
+          </div>
+        )}
+
+        <div className="sandbox-columns">
+          <div className="sandbox-panel">
+            <h3>Drugs for selected receptor</h3>
+            {receptorId ? (
+              receptorMatches.length > 0 ? (
+                <div className="sandbox-list">
+                  {receptorMatches.map(({ drug, binding }) => (
+                    <button
+                      key={`${receptorId}_${drug.id}`}
+                      className="sandbox-list-item"
+                      onClick={() => onDrugChange(drug.name)}
+                    >
+                      <span>{DRUG_CLASS_ICONS[drug.drugClass] ?? '💊'}</span>
+                      <span>{drug.name}</span>
+                      <span>{ACTION_LABELS[binding.action] ?? binding.action}</span>
+                    </button>
+                  ))}
+                </div>
+              ) : (
+                <p className="sandbox-empty">No drugs currently mapped to this receptor.</p>
+              )
+            ) : (
+              <p className="sandbox-empty">Select a receptor to list interacting drugs.</p>
+            )}
+          </div>
+
+          <div className="sandbox-panel">
+            <h3>Receptors for selected drug</h3>
+            {selectedDrug ? (
+              selectedDrug.receptorBindings.length > 0 ? (
+                <div className="sandbox-list">
+                  {selectedDrug.receptorBindings.map((binding) => {
+                    const receptor = receptors.find((r) => r.id === binding.receptorId);
+                    return (
+                      <button
+                        key={`${selectedDrug.id}_${binding.receptorId}`}
+                        className="sandbox-list-item"
+                        onClick={() => onReceptorChange(binding.receptorId)}
+                      >
+                        <span>{NT_ICONS[receptor?.neurotransmitter ?? ''] ?? '🧠'}</span>
+                        <span>{receptor?.name ?? binding.receptorId}</span>
+                        <span>{ACTION_LABELS[binding.action] ?? binding.action}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+              ) : (
+                <p className="sandbox-empty">This drug has no receptor bindings listed.</p>
+              )
+            ) : (
+              <p className="sandbox-empty">Select a drug to list its receptor interactions.</p>
+            )}
+          </div>
+        </div>
       </div>
     </div>
   );
